@@ -3,13 +3,14 @@
 #include "settings.h"
 #include "webServer.h"
 #include "sensors.h"
-#include "filters.h"
+#include <ESP8266Influxdb.h>
 
 WiFiClient client;
+
 extern struct Settings settings;
 
-simpleFilter filter_pm25;
-simpleFilter filter_pm10;
+void heartBeatModulation(uint32_t time_counter);
+void send_data_InfluxDB(float data_1, float data_2, float data_3, float data_4);
 
 void setup() {
   int button_cnt = 0;
@@ -30,7 +31,7 @@ void setup() {
     Serial.println("Configuration loaded.");
   }
   else {
-    Serial.println("Resore default configuration.");
+    Serial.println("Restore default configuration.");
     set_default_settings();
     save_settings();
   }
@@ -70,12 +71,8 @@ void setup() {
     Serial.println("Start setup mode only");
     changeHttpServerMode(WIFI_AP);
   }
-  init_sensors();
 
-  filter_pm25.setFilterSize(15);
-  filter_pm10.setFilterSize(15);
-  filter_pm25.clear();
-  filter_pm10.clear();
+  init_sensors();
 }
 
 uint32_t counter = 0;
@@ -88,40 +85,8 @@ void loop() {
   heartBeatModulation(counter);
 
   if (counter == 0) {
-   dustSensor_enable(true);
-  }
-  else if(counter < (SENSOR_WARMING_TIME * 10)) {
     char temp[10];
-    float pm25, pm10;
-    if (counter % 10 == 0) {
-      if (dustSensor_getData(&pm25, &pm10) == 0) {
-         filter_pm25.add(pm25);
-         filter_pm10.add(pm10);
-      }
-    }
-  } else if (counter  == (SENSOR_WARMING_TIME * 10)) {
-    char temp[10];
-    float pm25, pm10;
     float temperature, humidity;
-
-    dustSensor_getData(&pm25, &pm10);
-    dustSensor_enable(false);
-
-    pm25 = filter_pm25.get();
-    pm10 = filter_pm10.get();
-    filter_pm25.clear();
-    filter_pm10.clear();
-
-    //PM25
-    Serial.print("PM2.5 norm=");
-    sprintf(temp,"%.1f", (pm25*100)/PM25_NORM);
-    Serial.print(temp);
-    Serial.print("% / ");
-    //PM10
-    Serial.print("PM10 norm=");
-    sprintf(temp,"%.1f", (pm10*100)/PM10_NORM);
-    Serial.print(temp);
-    Serial.println("%");
 
     temperature = getTemperature();
     humidity = getHumidity();
@@ -140,17 +105,17 @@ void loop() {
 
       //sent to ThinkSpeak
       if (isConnectedSTA()) {
-        send_data_ThingSpeak(temperature, humidity, (pm25*100)/PM25_NORM, (pm10*100)/PM10_NORM);
+        send_data_ThingSpeak(temperature, humidity, 1, 1);
+        send_data_InfluxDB(temperature, humidity, 1, 1);
+        
       }
     }
   } else {
     if (settings.wifi_mode == 2) { //Sleep mode -> wifi mode: 2 - WIFI_STA_DEEP_SLEEP;
-      uint32_t sleep_time = settings.sleep_time - SENSOR_WARMING_TIME;
+      uint32_t sleep_time = settings.sleep_time;
       Serial.print("sleep = ");
       Serial.println(sleep_time,DEC);
       ESP.deepSleep(sleep_time * 1000000);
-    } else {
-      //Serial.println("wait...");
     }
   }
 
@@ -164,6 +129,12 @@ void loop() {
 
 void send_data_ThingSpeak(float data_1, float data_2, float data_3, float data_4) {
   char temp[20];
+
+  // There is no API KEY
+  if(strlen(settings.ts_api_key) == 0) {
+    Serial.println("NO API KEY - skipped data sending to ThingSpeak");
+    return;
+  }
 
   if (client.connect(TS_SERVER_NAME,80)) {
     String API_KEY = settings.ts_api_key;
@@ -195,6 +166,42 @@ void send_data_ThingSpeak(float data_1, float data_2, float data_3, float data_4
     Serial.println("Sent to Thingspeak.");
   }
   client.stop();
+}
+
+void send_data_InfluxDB(float data_1, float data_2, float data_3, float data_4) {
+  // There is no server address
+  if(strlen(settings.influxdb_server_address) == 0) {
+    Serial.println("UNKNOW InfluxDB server - skipped data sending to database");
+    return;
+  }
+
+  Influxdb influxdb(settings.influxdb_server_address, settings.influxdb_server_port);
+  influxdb.opendb(settings.influxdb_db_name, settings.influxdb_user, settings.influxdb_pass);
+
+
+//Test 1
+
+  // Writing data with influxdb HTTP API
+  // https://influxdb.com/docs/v0.9/guides/writing_data.html
+  Serial.println("Writing data to host " + String(settings.influxdb_server_address) + ":" +
+                 settings.influxdb_server_port + "'s database=" + settings.influxdb_db_name);
+  String data = "analog_read,method=HTTP_API,pin=A0 value=" + String(10.7);
+  influxdb.write(data);
+  Serial.println(influxdb.response() == DB_SUCCESS ? "HTTP write success"
+                 : "Writing failed - HTTP API");
+
+
+ // Writing data using FIELD object
+  // Create field object with measurment name=analog_read
+  FIELD dataObj("analog_read");
+  dataObj.addTag("method", "Field_object"); // Add method tag
+  dataObj.addTag("pin", "A0"); // Add pin tag
+  dataObj.addField("value", analogRead(11.5)); // Add value field
+  Serial.println(influxdb.write(dataObj) == DB_SUCCESS ? "Object write success"
+                 : "Writing failed - FIELD object");
+
+  
+  Serial.println("----> End function");
 }
 
 //changes LED state

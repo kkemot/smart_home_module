@@ -9,28 +9,8 @@ SHT1x sht1x(sht_dataPin, sht_clockPin);
 static float temperature;
 static float humidity;
 
-SDS011 my_sds;
 
 void init_sensors(void) {
-  my_sds.begin(dust_rx, dust_tx);
-  my_sds.wakeup();
-}
-
-void dustSensor_enable(bool enable) {
-  if (enable == true) {
-    Serial.println("Wakeup dust sensor !");
-    my_sds.wakeup();
-  } else {
-     Serial.println("Sleep dust sensor !");
-     my_sds.sleep();
-  }
-}
-
-//read data and deactivate dust sensor
-int dustSensor_getData(float *p25, float *p10) {
-
-  int error = my_sds.read(p25, p10);
-  return error;
 }
 
 void printSensorResoults(void) {
@@ -56,28 +36,6 @@ void printSensorResoults(void) {
   }
   else {
      Serial.println("data ok");
-  }
-
-
-  if (my_sds.read(&pm25, &pm10) != 0) {
-    pm25 = 0;
-    pm10 = 0;
-    Serial.println("Dust sensor data is unavailable");
-  }
-  else {
-    Serial.println("P2.5: "+String(pm25));
-    Serial.println("P10:  "+String(pm10));
-
-    //PM25
-    Serial.print("PM2.5 norm=");
-    sprintf(temp,"%.1f", (pm25*100)/PM25_NORM);
-    Serial.print(temp);
-    Serial.println("%");
-    //PM10
-    Serial.print("PM10 norm=");
-    sprintf(temp,"%.1f", (pm10*100)/PM10_NORM);
-    Serial.print(temp);
-    Serial.println("%");
   }
 }
 
