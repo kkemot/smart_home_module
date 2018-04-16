@@ -7,7 +7,7 @@ Simple module based on open hardware devices.
 1) ArduinoJson (https://github.com/bblanchon/ArduinoJson)
 2) SHT11 (https://github.com/practicalarduino/SHT1x)
 3) Dust sensor library (https://github.com/ricki-z/SDS011)
-4) InfluxDB library(https://github.com/hwwong/ESP8266Influxdb)
+4) InfluxDB library(https://github.com/hwwong/ESP_influxdb)
 
 # Hardware
 - ESP8266 module, eg: ESP8266MOD

@@ -3,14 +3,15 @@
 #include "settings.h"
 #include "webServer.h"
 #include "sensors.h"
-#include <ESP8266Influxdb.h>
+#include <ESPinfluxdb.h>
 
 WiFiClient client;
 
 extern struct Settings settings;
 
 void heartBeatModulation(uint32_t time_counter);
-void send_data_InfluxDB(float data_1, float data_2, float data_3, float data_4);
+void send_data_InfluxDB(float data_1, float data_2);
+void send_data_ThingSpeak(float data_1, float data_2);
 
 void setup() {
   int button_cnt = 0;
@@ -105,8 +106,8 @@ void loop() {
 
       //sent to ThinkSpeak
       if (isConnectedSTA()) {
-        send_data_ThingSpeak(temperature, humidity, 1, 1);
-        send_data_InfluxDB(temperature, humidity, 1, 1);
+        send_data_ThingSpeak(temperature, humidity);
+        send_data_InfluxDB(temperature, humidity);
         
       }
     }
@@ -127,7 +128,7 @@ void loop() {
 }
 
 
-void send_data_ThingSpeak(float data_1, float data_2, float data_3, float data_4) {
+void send_data_ThingSpeak(float data_1, float data_2) {
   char temp[20];
 
   // There is no API KEY
@@ -144,12 +145,6 @@ void send_data_ThingSpeak(float data_1, float data_2, float data_3, float data_4
     postStr += String(temp);
     postStr +="&field2=";
     sprintf(temp,"%.0f", data_2);
-    postStr += String(temp);
-    postStr +="&field3=";
-    sprintf(temp,"%.1f", data_3);
-    postStr += String(temp);
-    postStr +="&field4=";
-    sprintf(temp,"%.1f", data_4);
     postStr += String(temp);
     postStr += "\r\n\r\n";
 
@@ -168,7 +163,8 @@ void send_data_ThingSpeak(float data_1, float data_2, float data_3, float data_4
   client.stop();
 }
 
-void send_data_InfluxDB(float data_1, float data_2, float data_3, float data_4) {
+void send_data_InfluxDB(float data_1, float data_2) {
+  char temp[20];
   // There is no server address
   if(strlen(settings.influxdb_server_address) == 0) {
     Serial.println("UNKNOW InfluxDB server - skipped data sending to database");
@@ -176,32 +172,34 @@ void send_data_InfluxDB(float data_1, float data_2, float data_3, float data_4) 
   }
 
   Influxdb influxdb(settings.influxdb_server_address, settings.influxdb_server_port);
-  influxdb.opendb(settings.influxdb_db_name, settings.influxdb_user, settings.influxdb_pass);
 
+  if (settings.influxdb_user != "" &&  settings.influxdb_pass != "") {
+      if (influxdb.configure(settings.influxdb_db_name, settings.influxdb_user, settings.influxdb_pass)) {
+        Serial.println("Opend database failed");
+      }
+  }
+  else {
+    if (influxdb.configure(settings.influxdb_db_name)!=DB_SUCCESS) {
+      Serial.println("Opend database failed");
+    }
+  }
 
-//Test 1
+  // Create data object: series,tag=ta1,tag=tag2,tag=tag3 value=1.0, value=2.0
+  dbMeasurement row(settings.influxdb_series_name);
+  row.addTag("module", settings.influxdb_type_tag);       // Add type: electrometer, envirement sensor, watermeter
+  row.addTag("location", settings.influxdb_location_tag); // Add location: wroclaw
+  row.addTag("id", settings.influxdb_nodeid_tag); // Add id: module name -> "light" / "kitchen"
 
-  // Writing data with influxdb HTTP API
-  // https://influxdb.com/docs/v0.9/guides/writing_data.html
-  Serial.println("Writing data to host " + String(settings.influxdb_server_address) + ":" +
-                 settings.influxdb_server_port + "'s database=" + settings.influxdb_db_name);
-  String data = "analog_read,method=HTTP_API,pin=A0 value=" + String(10.7);
-  influxdb.write(data);
-  Serial.println(influxdb.response() == DB_SUCCESS ? "HTTP write success"
-                 : "Writing failed - HTTP API");
+  sprintf(temp,"%.1f", data_1);
+  row.addField("temperature", temp); // Add value field
+  sprintf(temp,"%.0f", data_2);
+  row.addField("humidity", temp); // Add random value
 
+  Serial.println(influxdb.write(row) == DB_SUCCESS ? "Object write success"
+                 : "Writing failed");
 
- // Writing data using FIELD object
-  // Create field object with measurment name=analog_read
-  FIELD dataObj("analog_read");
-  dataObj.addTag("method", "Field_object"); // Add method tag
-  dataObj.addTag("pin", "A0"); // Add pin tag
-  dataObj.addField("value", analogRead(11.5)); // Add value field
-  Serial.println(influxdb.write(dataObj) == DB_SUCCESS ? "Object write success"
-                 : "Writing failed - FIELD object");
-
-  
-  Serial.println("----> End function");
+  //Empty field object.
+  row.empty();
 }
 
 //changes LED state
